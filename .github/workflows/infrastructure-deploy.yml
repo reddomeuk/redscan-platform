@@ -10,30 +10,87 @@ on:
   repository_dispatch:
     types: [app-release]
 
+env:
+  TF_CLOUD_ORGANIZATION: "reddome-org"  # Replace with your Terraform Cloud org
+  TF_WORKSPACE_STAGING: "redscan-staging"
+  TF_WORKSPACE_PROD: "redscan-production"
+
 jobs:
-  terraform-plan:
+  terraform-cloud-plan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-      - name: Terraform Plan
-        working-directory: ./terraform
-        run: |
-          terraform init
-          terraform plan -var-file="environments/prod.tfvars"
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-  terraform-apply:
-    needs: terraform-plan
+      - name: Terraform Cloud Plan (Staging)
+        if: github.ref != 'refs/heads/main'
+        run: |
+          cat > terraform/backend.tf << EOF
+          terraform {
+            cloud {
+              organization = "${{ env.TF_CLOUD_ORGANIZATION }}"
+              workspaces {
+                name = "${{ env.TF_WORKSPACE_STAGING }}"
+              }
+            }
+          }
+          EOF
+          
+          cd terraform
+          terraform init
+          terraform plan
+
+      - name: Terraform Cloud Plan (Production)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cat > terraform/backend.tf << EOF
+          terraform {
+            cloud {
+              organization = "${{ env.TF_CLOUD_ORGANIZATION }}"
+              workspaces {
+                name = "${{ env.TF_WORKSPACE_PROD }}"
+              }
+            }
+          }
+          EOF
+          
+          cd terraform
+          terraform init
+          terraform plan
+
+  terraform-cloud-apply:
+    needs: terraform-cloud-plan
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-      - name: Terraform Apply
-        working-directory: ./terraform
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Cloud Apply (Production)
         run: |
+          cat > terraform/backend.tf << EOF
+          terraform {
+            cloud {
+              organization = "${{ env.TF_CLOUD_ORGANIZATION }}"
+              workspaces {
+                name = "${{ env.TF_WORKSPACE_PROD }}"
+              }
+            }
+          }
+          EOF
+          
+          cd terraform
           terraform init
-          terraform apply -auto-approve -var-file="environments/prod.tfvars"
+          terraform apply -auto-approve
 
   deploy-application:
     if: github.event_name == 'repository_dispatch'
