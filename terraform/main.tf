@@ -1,28 +1,3 @@
-terraform {
-  required_version = ">= 1.0"
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.0"
-    }
-    azuread = {
-      source  = "hashicorp/azuread"
-      version = "~> 2.0"
-    }
-  }
-  
-  backend "azurerm" {
-    # Backend configuration will be provided during terraform init
-    # Use Azure Storage Account for state management
-  }
-}
-
-provider "azurerm" {
-  features {}
-}
-
-provider "azuread" {}
-
 # Data source for current client configuration
 data "azurerm_client_config" "current" {}
 
@@ -34,26 +9,26 @@ resource "azurerm_resource_group" "redscan" {
   tags = var.common_tags
 }
 
-# Storage Account for Terraform State (if using remote backend)
-resource "azurerm_storage_account" "terraform_state" {
-  name                     = var.storage_account_name
-  resource_group_name      = azurerm_resource_group.redscan.name
-  location                = azurerm_resource_group.redscan.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  
-  blob_properties {
-    versioning_enabled = true
-  }
+# Storage Account for Terraform State (Not needed with Terraform Cloud)
+# resource "azurerm_storage_account" "terraform_state" {
+#   name                     = var.storage_account_name
+#   resource_group_name      = azurerm_resource_group.redscan.name
+#   location                = azurerm_resource_group.redscan.location
+#   account_tier             = "Standard"
+#   account_replication_type = "LRS"
+#   
+#   blob_properties {
+#     versioning_enabled = true
+#   }
+#
+#   tags = var.common_tags
+# }
 
-  tags = var.common_tags
-}
-
-resource "azurerm_storage_container" "terraform_state" {
-  name                  = "terraform-state"
-  storage_account_name  = azurerm_storage_account.terraform_state.name
-  container_access_type = "private"
-}
+# resource "azurerm_storage_container" "terraform_state" {
+#   name                  = "terraform-state"
+#   storage_account_name  = azurerm_storage_account.terraform_state.name
+#   container_access_type = "private"
+# }
 
 # Static Web App
 resource "azurerm_static_site" "redscan_app" {

@@ -24,6 +24,14 @@ variable "resource_group_name" {
   default     = "rg-redscan-prod"
 }
 
+# Azure Service Principal Configuration
+# Note: These values should be set as environment variables in Terraform Cloud:
+# - ARM_CLIENT_ID
+# - ARM_CLIENT_SECRET  
+# - ARM_SUBSCRIPTION_ID
+# - ARM_TENANT_ID
+# Do not set default values here for security reasons
+
 # Static Web App Configuration
 variable "static_web_app_name" {
   description = "Name of the Azure Static Web App"
