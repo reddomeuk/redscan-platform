@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  redscan-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - VITE_API_URL=${VITE_API_URL:-https://api.redscan.com}
+      - VITE_BASE44_API_URL=${VITE_BASE44_API_URL:-https://api.base44.com}
+      - VITE_APP_ENV=production
+      - VITE_ENABLE_DEV_TOOLS=false
+      - VITE_LOG_LEVEL=error
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - redscan-prod
+    networks:
+      - redscan-network
+    restart: unless-stopped
+
+networks:
+  redscan-network:
+    driver: bridge

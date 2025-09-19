@@ -1,0 +1,276 @@
+# RedScan Modular Platform - Production Ready
+version: '3.8'
+
+services:
+  # API Gateway - Routes requests to appropriate modules
+  api-gateway:
+    build:
+      context: .
+      dockerfile: shared/api-gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - CORE_DASHBOARD_URL=http://core-dashboard:80
+      - AI_ASSISTANT_URL=http://ai-assistant:3000
+      - COMPLIANCE_URL=http://compliance:80
+      - NETWORK_SECURITY_URL=http://network-security:80
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Core Dashboard Module
+  core-dashboard:
+    build:
+      context: .
+      dockerfile: modules/core-dashboard/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - API_GATEWAY_URL=http://api-gateway:8080
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.3'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - api-gateway
+
+  # AI Assistant Module
+  ai-assistant:
+    build:
+      context: .
+      dockerfile: modules/ai-assistant/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GOOGLE_AI_STUDIO_KEY=${GOOGLE_AI_STUDIO_KEY}
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    deploy:
+      replicas: 3  # Higher replicas for AI workload
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Compliance Module
+  compliance:
+    build:
+      context: .
+      dockerfile: modules/compliance/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Network Security Module
+  network-security:
+    build:
+      context: .
+      dockerfile: modules/network-security/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - SCAN_WORKERS=4
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 768M
+          cpus: '0.7'
+        reservations:
+          memory: 384M
+          cpus: '0.3'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Asset Management Module
+  asset-management:
+    build:
+      context: .
+      dockerfile: modules/asset-management/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.2'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # Load Balancer / Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+      - core-dashboard
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.2'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Monitoring and Observability
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - redscan-network
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - redscan-network
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  redscan-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

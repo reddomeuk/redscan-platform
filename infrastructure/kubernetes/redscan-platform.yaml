@@ -1,0 +1,384 @@
+# Namespace for RedScan Platform
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: redscan
+  labels:
+    name: redscan
+    environment: production
+---
+# Core Dashboard Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-dashboard
+  namespace: redscan
+  labels:
+    app: core-dashboard
+    module: dashboard
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: core-dashboard
+  template:
+    metadata:
+      labels:
+        app: core-dashboard
+        module: dashboard
+    spec:
+      containers:
+      - name: core-dashboard
+        image: redscan/core-dashboard:latest
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "300m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: API_GATEWAY_URL
+          value: "http://api-gateway:8080"
+      imagePullPolicy: Always
+---
+# Core Dashboard Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-dashboard
+  namespace: redscan
+  labels:
+    app: core-dashboard
+spec:
+  selector:
+    app: core-dashboard
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP
+---
+# AI Assistant Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-assistant
+  namespace: redscan
+  labels:
+    app: ai-assistant
+    module: ai
+spec:
+  replicas: 4  # Higher replicas for AI workload
+  selector:
+    matchLabels:
+      app: ai-assistant
+  template:
+    metadata:
+      labels:
+        app: ai-assistant
+        module: ai
+    spec:
+      containers:
+      - name: ai-assistant
+        image: redscan/ai-assistant:latest
+        ports:
+        - containerPort: 3000
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-secrets
+              key: groq-api-key
+        - name: OPENROUTER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-secrets
+              key: openrouter-api-key
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+      imagePullPolicy: Always
+---
+# AI Assistant Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-assistant
+  namespace: redscan
+  labels:
+    app: ai-assistant
+spec:
+  selector:
+    app: ai-assistant
+  ports:
+  - port: 3000
+    targetPort: 3000
+    protocol: TCP
+  type: ClusterIP
+---
+# API Gateway Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: redscan
+  labels:
+    app: api-gateway
+    module: gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        module: gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: redscan/api-gateway:latest
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: auth-secrets
+              key: jwt-secret
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        - name: CORE_DASHBOARD_URL
+          value: "http://core-dashboard:80"
+        - name: AI_ASSISTANT_URL
+          value: "http://ai-assistant:3000"
+      imagePullPolicy: Always
+---
+# API Gateway Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: redscan
+  labels:
+    app: api-gateway
+spec:
+  selector:
+    app: api-gateway
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
+---
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: redscan
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        args:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --maxmemory
+        - "200mb"
+        - --maxmemory-policy
+        - allkeys-lru
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-pvc
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: redscan
+  labels:
+    app: redis
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+  type: ClusterIP
+---
+# Redis PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: redscan
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+# Ingress for External Access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: redscan-ingress
+  namespace: redscan
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/add-base-url: "true"
+spec:
+  tls:
+  - hosts:
+    - redscan.yourdomain.com
+    secretName: redscan-tls
+  rules:
+  - host: redscan.yourdomain.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8080
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: core-dashboard
+            port:
+              number: 80
+---
+# Horizontal Pod Autoscaler for AI Assistant
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-assistant-hpa
+  namespace: redscan
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-assistant
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
