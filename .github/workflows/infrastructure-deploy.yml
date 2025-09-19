@@ -95,8 +95,56 @@ jobs:
   deploy-application:
     if: github.event_name == 'repository_dispatch'
     runs-on: ubuntu-latest
+    environment: ${{ github.event.client_payload.environment }}
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
       - name: Deploy Application
         run: |
-          ./scripts/deploy.sh update redscan-app ${{ github.event.client_payload.version }}
+          echo "🚀 Deploying application version: ${{ github.event.client_payload.version }}"
+          echo "Environment: ${{ github.event.client_payload.environment }}"
+          echo "Triggered by: ${{ github.event.client_payload.author }}"
+          echo "Commit: ${{ github.event.client_payload.commit_message }}"
+          
+          # Update Terraform Cloud workspace with new app version
+          cat > terraform/app-version.auto.tfvars << EOF
+          app_version = "${{ github.event.client_payload.version }}"
+          environment = "${{ github.event.client_payload.environment }}"
+          EOF
+          
+          # Trigger Terraform Cloud run
+          cd terraform
+          terraform init
+          terraform plan
+          
+          # Auto-apply for staging, manual approval for production
+          if [ "${{ github.event.client_payload.environment }}" = "staging" ]; then
+            terraform apply -auto-approve
+          else
+            echo "⏳ Production deployment requires manual approval in Terraform Cloud"
+          fi
+
+      - name: Notify Application Team
+        if: always()
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          repository: ${{ github.event.client_payload.repository }}
+          event-type: deployment-status
+          client-payload: |
+            {
+              "deployment_status": "${{ job.status }}",
+              "environment": "${{ github.event.client_payload.environment }}",
+              "version": "${{ github.event.client_payload.version }}",
+              "platform_run_id": "${{ github.run_id }}"
+            }
